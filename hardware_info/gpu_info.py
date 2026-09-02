@@ -77,7 +77,7 @@ class GPUInfoCollector:
             result = subprocess.run(['brsmi'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 output = result.stdout
-                model_pattern = re.compile(r'BR\d+', re.IGNORECASE)
+                model_pattern = re.compile(r'Biren\d+[A-Z]*|BR\d+', re.IGNORECASE)
                 models = model_pattern.findall(output)
 
                 # 获取详细信息
@@ -101,8 +101,8 @@ class GPUInfoCollector:
         """解析brsmi输出，获取详细信息"""
         details = {}
 
-        # 显存信息 - 格式: "858/65536 MiB"
-        mem_match = re.search(r'(\d+)\s*/\s*(\d+)\s*MiB', output)
+        # 显存信息 - 格式: "0MiB / 32512MiB" 或 "858/65536 MiB"
+        mem_match = re.search(r'(\d+)\s*MiB\s*/\s*(\d+)\s*MiB', output)
         if mem_match:
             mem_used = int(mem_match.group(1))
             mem_total = int(mem_match.group(2))
