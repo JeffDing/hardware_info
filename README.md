@@ -56,66 +56,28 @@ ethtool        # 网卡驱动信息
 lsblk          # 磁盘信息
 ```
 
-## 安装方法
-
-### 方式1：克隆仓库
-
-```bash
-git clone <repository-url>
-cd hardware_info
-pip install -e .
-```
-
-### 方式2：直接使用
-
-```bash
-# 直接复制 hardware_info 目录到项目中使用
-cp -r hardware_info /path/to/your/project/
-```
-
 ## 使用方法
 
-### 命令行使用
+### 方式1：直接运行主程序
 
 ```bash
-# 基本使用 - 打印报告
+# 进入项目目录
+cd /tmp/code
+
+# 运行主程序（默认输出Markdown格式）
 python3 main.py
 
-# 输出JSON格式
-python3 main.py --json
-
 # 保存到文件
-python3 main.py --output report.txt
-python3 main.py --json --output report.json
-
-# 显示帮助
-python3 main.py --help
-
-# 显示版本
-python3 main.py --version
+python3 main.py --output report.md
 ```
 
-### Python API 使用
+### 方式2：作为模块导入
 
 ```python
 from hardware_info import HardwareInfoCollector
 
-# 创建收集器
 collector = HardwareInfoCollector()
-
-# 收集所有硬件信息
-data = collector.collect_all()
-
-# 单独收集特定类型信息
-system_info = collector.get_system_info()
-cpu_info = collector.get_cpu_info()
-gpu_info = collector.get_gpu_info()
-npu_info = collector.get_npu_info()
-memory_info = collector.get_memory_info()
-disk_info = collector.get_disk_info()
-network_info = collector.get_network_info()
-
-# 打印报告
+collector.collect_all()
 collector.print_report()
 ```
 
