@@ -11,7 +11,7 @@
 | **系统信息** | 操作系统、主机名、处理器架构、BIOS版本等 |
 | **CPU信息** | Intel、AMD、海光、兆芯、飞腾、鲲鹏等 |
 | **GPU信息** | NVIDIA、AMD、Intel、摩尔线程、壁仞科技、沐曦、天数智芯、海光 |
-| **NPU信息** | 华为昇腾（Ascend 910/950） |
+| **NPU信息** | 华为昇腾（Ascend 910/950/310P） |
 | **内存信息** | 总内存、可用内存、内存条详细信息 |
 | **磁盘信息** | 分区信息、磁盘物理信息、SMART数据 |
 | **网络信息** | IP地址、MAC地址、网卡驱动、网络统计 |
@@ -141,7 +141,7 @@ README.md                # 说明文档
 | `system_info.py` | 系统信息收集（Linux/Windows/macOS DMI信息） |
 | `cpu_info.py` | CPU信息收集（含国产CPU厂商识别） |
 | `gpu_info.py` | GPU信息收集（支持壁仞、沐曦等详细信息） |
-| `npu_info.py` | NPU信息收集（华为昇腾910/950） |
+| `npu_info.py` | NPU信息收集（华为昇腾910/950/310P） |
 | `memory_info.py` | 内存信息收集（含内存条详细信息） |
 | `disk_info.py` | 磁盘信息收集（支持SMART数据） |
 | `network_info.py` | 网络信息收集（含驱动信息） |
@@ -166,7 +166,7 @@ README.md                # 说明文档
 
 | 厂商 | 检测工具 | 详细信息 |
 |------|----------|----------|
-| 华为昇腾 | npu-smi | 型号、功耗、温度、HBM使用率、利用率 |
+| 华为昇腾 | npu-smi | 型号、产品类型、HBM/DDR容量、温度、功耗、利用率、固件版本、板卡ID、芯片版本 |
 
 ### CPU
 
@@ -178,28 +178,6 @@ README.md                # 说明文档
 | 飞腾 | model name、CPU part |
 | 海光 | vendor ID、model name |
 | 兆芯 | vendor ID、model name |
-
-## 常见问题
-
-### Q: 为什么某些硬件信息显示"无数据"？
-
-A: 可能原因：
-1. 未安装对应的检测工具（如 brsmi、mx-smi 等）
-2. 没有足够的权限（某些命令需要 root 或 sudo）
-3. 硬件不存在或未正确安装
-
-### Q: 如何获取更详细的内存信息？
-
-A: `dmidecode` 命令需要 root 权限，可以使用：
-```bash
-sudo python3 main.py
-```
-
-### Q: 壁仞/沐曦 GPU 显示详细信息需要什么？
-
-A: 需要安装对应厂商的驱动和 SMI 工具：
-- 壁仞：安装 biren 驱动，确保 `brsmi` 命令可用
-- 沐曦：安装 metax 驱动，确保 `mx-smi` 命令可用
 
 ## 许可证
 

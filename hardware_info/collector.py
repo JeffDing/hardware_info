@@ -13,7 +13,7 @@ from .gpu_info import GPUInfoCollector
 from .npu_info import NPUInfoCollector
 from .memory_info import MemoryInfoCollector
 from .disk_info import DiskInfoCollector
-from .network_info import NetworkInfoCollector
+from .network_info import NetworkInfoCollector, IPGeolocationService
 
 
 class HardwareInfoCollector:
@@ -55,6 +55,9 @@ class HardwareInfoCollector:
 
         # 网络信息
         self.network_info = NetworkInfoCollector().collect()
+
+        # IP地理位置信息
+        self.ip_info = IPGeolocationService().query_ip()
 
         print("=" * 60)
         print("硬件信息收集完成!")
@@ -178,11 +181,35 @@ class HardwareInfoCollector:
 
         # 网络信息
         lines.append("\n## 网卡信息\n")
-        for i, interface in enumerate(self.network_info, 1):
-            lines.append(f"### 设备 {i}: {interface.get('接口名称', '未知')}\n")
-            for key, value in interface.items():
-                if key != "接口名称":
-                    lines.append(f"| {key} | {value} |")
+        if self.network_info:
+            for i, interface in enumerate(self.network_info, 1):
+                lines.append(f"### 设备 {i}: {interface.get('接口名称', '未知')}\n")
+                for key, value in interface.items():
+                    if key != "接口名称":
+                        lines.append(f"| {key} | {value} |")
+        else:
+            lines.append("*无数据*")
+
+        # IP地理位置信息
+        lines.append("\n## IP地理位置信息\n")
+        if self.ip_info:
+            lines.append(f"| IP地址 | {self.ip_info.get('ip', '未知')} |")
+            lines.append(f"| 国家 | {self.ip_info.get('country', '未知')} ({self.ip_info.get('country_code', '未知')}) |")
+            lines.append(f"| 地区/省 | {self.ip_info.get('region', '未知')} |")
+            lines.append(f"| 城市 | {self.ip_info.get('city', '未知')} |")
+            lines.append(f"| 邮政编码 | {self.ip_info.get('zip', '未知')} |")
+            lat = self.ip_info.get('latitude')
+            lon = self.ip_info.get('longitude')
+            if lat and lon:
+                lines.append(f"| 纬度 | {lat} |")
+                lines.append(f"| 经度 | {lon} |")
+            if self.ip_info.get('timezone'):
+                lines.append(f"| 时区 | {self.ip_info.get('timezone')} |")
+            lines.append(f"| ISP运营商 | {self.ip_info.get('isp', '未知')} |")
+            lines.append(f"| 组织 | {self.ip_info.get('org', '未知')} |")
+            lines.append(f"| AS号 | {self.ip_info.get('as', '未知')} |")
+        else:
+            lines.append("*无数据*")
 
         lines.append("\n---")
         lines.append("*报告生成时间*")
