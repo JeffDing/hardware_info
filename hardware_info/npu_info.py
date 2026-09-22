@@ -53,9 +53,11 @@ class NPUInfoCollector:
 
             # 匹配NPU信息行 (第一行数据)
             # 格式: | NPU_ID Name | Health | Power(W) Temp(C) Hugepages_Used / Hugepages_Total |
-            # NPU ID 和 Name 在同一列用空格分隔; Power可能是数字(67.5)、NA(310P3)或-(无数据)
+            # 旧版(如910/310P): NPU ID 和 Name 在同一列用空格分隔, 如 "| 0        Ascend910B4  | OK  ..."
+            # 新版(如950PR/npu-smi 25.x): NPU ID 和 Name 拆成两列, 如 "| 0      | Ascend950PR      | OK  ..."
+            # (\d+) 后的 \s*\|?\s* 兼容两种列分隔; Power可能是数字(67.5)、NA(310P3)或-(无数据)
             npu_match = re.match(
-                r'\|\s*(\d+)\s+(\S+)\s*\|\s*(\w+)\s+\|\s*([\d.\-]+|NA)\s+(\d+)\s+(\d+)\s*/\s*(\d+)\s*\|',
+                r'\|\s*(\d+)\s*\|?\s*(\S+?)\s*\|\s*(\w+)\s+\|\s*([\d.\-]+|NA)\s+(\d+)\s+(\d+)\s*/\s*(\d+)\s*\|',
                 line
             )
             if npu_match:
@@ -92,10 +94,13 @@ class NPUInfoCollector:
                         break
 
                 if bus_id is not None:
-                    # 提取Chip ID和Device ID (格式: "Chip Device")
-                    chip_device = parts[0].split() if parts[0] else []
-                    chip_id = chip_device[0] if len(chip_device) > 0 else '0'
-                    device_id = chip_device[1] if len(chip_device) > 1 else '0'
+                    # 提取Chip ID和Device ID (格式: "Chip Device", 仅部分多芯片设备单独成列;
+                    # 单卡设备该列为空, parts[0]此时是Bus-Id本身, 不能误取)
+                    chip_id, device_id = '0', '0'
+                    chip_device_match = re.fullmatch(r'(\d+)\s+(\d+)', parts[0]) if parts else None
+                    if chip_device_match:
+                        chip_id = chip_device_match.group(1)
+                        device_id = chip_device_match.group(2)
                     pending_npu["Chip ID"] = chip_id
                     pending_npu["Device ID"] = device_id
                     pending_npu["Bus-Id"] = bus_id
@@ -140,39 +145,94 @@ class NPUInfoCollector:
             chip_version = self._extract_field(board_info, r'Chip\s*Version\s*:\s*(\S+)')
             board_id = self._extract_field(board_info, r'Board\s*ID\s*:\s*(\S+)')
             firmware = self._extract_field(board_info, r'Firmware\s*Version\s*:\s*(\S+)')
+            # 新版(npu-smi 25.x)新增字段
+            product_name = self._extract_field(board_info, r'Product\s*Name\s*:\s*(\S+)')
+            npu_name = self._extract_field(board_info, r'NPU\s*Name\s*:\s*(\S+)')
+            manufacturer = self._extract_field(board_info, r'Manufacturer\s*:\s*(\S+)')
+            serial_number = self._extract_field(board_info, r'Serial\s*Number\s*:\s*(\S+)')
+            sw_version = self._extract_field(board_info, r'Software\s*Version\s*:\s*(\S+)')
+            compatibility = self._extract_field(board_info, r'Compatibility\s*:\s*(\S+)')
+            pcie_bus = self._extract_field(board_info, r'PCIe\s*Bus\s*Info\s*:\s*(\S+)')
+            slot_id = self._extract_field(board_info, r'Slot\s*ID\s*:\s*(\d+)')
+            main_board_id = self._extract_field(board_info, r'Main\s*Board\s*ID\s*:\s*(\S+)')
+            pcb_id = self._extract_field(board_info, r'PCB\s*ID\s*:\s*(\S+)')
+            bom_id = self._extract_field(board_info, r'BOM\s*ID\s*:\s*(\d+)')
+            chip_count = self._extract_field(board_info, r'Chip\s*Count\s*:\s*(\d+)')
+            pci_vendor_id = self._extract_field(board_info, r'PCI\s*Vendor\s*ID\s*:\s*(\S+)')
+            pci_device_id = self._extract_field(board_info, r'PCI\s*Device\s*ID\s*:\s*(\S+)')
+            sub_vendor_id = self._extract_field(board_info, r'Subsystem\s*Vendor\s*ID\s*:\s*(\S+)')
+            sub_device_id = self._extract_field(board_info, r'Subsystem\s*Device\s*ID\s*:\s*(\S+)')
 
-            # 型号显示为 "Ascend 310P3" 等完整名称
+            # 型号显示为 "Ascend 310P3" 等完整名称; 新版无Chip Type时用Chip Name(如Ascend950PR)
             if chip_type and chip_name:
                 npu["型号"] = f"{chip_type} {chip_name}"
             elif chip_name:
                 npu["型号"] = chip_name
 
+            # 产品类型: 旧版取自product查询(Atlas 300I Duo), 新版950用board的Product Name
+            if product_name and "产品类型" not in npu:
+                npu["产品类型"] = product_name
+
+            if npu_name:
+                npu["NPU名称"] = npu_name
+            if manufacturer:
+                npu["制造商"] = manufacturer
+            if serial_number:
+                npu["序列号"] = serial_number
             if chip_version:
                 npu["芯片版本"] = chip_version
             if board_id:
                 npu["板卡ID"] = board_id
+            if main_board_id:
+                npu["主板ID"] = main_board_id
+            if pcb_id:
+                npu["PCB ID"] = pcb_id
+            if bom_id:
+                npu["BOM ID"] = bom_id
+            if chip_count:
+                npu["芯片数量"] = chip_count
             if firmware:
                 npu["固件版本"] = firmware
+            if sw_version:
+                npu["软件版本"] = sw_version
+            if compatibility:
+                npu["兼容性"] = compatibility
+            if pcie_bus:
+                npu["PCIe总线"] = pcie_bus
+            if slot_id:
+                npu["插槽ID"] = slot_id
+            if pci_vendor_id:
+                npu["PCI供应商ID"] = pci_vendor_id
+            if pci_device_id:
+                npu["PCI设备ID"] = pci_device_id
+            if sub_vendor_id:
+                npu["子系统供应商ID"] = sub_vendor_id
+            if sub_device_id:
+                npu["子系统设备ID"] = sub_device_id
 
         # memory信息: HBM容量(910/950) 或 DDR容量(310P)
         mem_info = self._run_npu_smi_type('memory', card_id, chip_id)
         if mem_info:
             hbm_cap = self._extract_field(mem_info, r'HBM\s*Capacity\(MB\)\s*:\s*(\d+)')
             hbm_clock = self._extract_field(mem_info, r'HBM\s*Clock\s*Speed\(MHz\)\s*:\s*(\d+)')
+            hbm_temp = self._extract_field(mem_info, r'HBM\s*Temperature\(C\)\s*:\s*(\d+)')
             total_ddr = self._extract_field(mem_info, r'Total\s*DDR\s*Capacity\(MB\)\s*:\s*(\d+)')
             # 用行首锚定避免误匹配 "Total DDR Capacity" 行
             ddr_cap = self._extract_field(mem_info, r'^\s*DDR\s*Capacity\(MB\)\s*:\s*(\d+)', re.MULTILINE)
             ddr_clock = self._extract_field(mem_info, r'^\s*DDR\s*Clock\s*Speed\(MHz\)\s*:\s*(\d+)', re.MULTILINE)
 
-            if hbm_cap:
+            # 容量/频率/温度为0表示硬件不存在该项(如950无DDR), 跳过不显示
+            if hbm_cap and int(hbm_cap) > 0:
                 npu["HBM容量"] = self._format_mb(int(hbm_cap))
-            if hbm_clock:
+            if hbm_clock and int(hbm_clock) > 0:
                 npu["HBM频率"] = f"{hbm_clock} MHz"
-            if total_ddr:
+            if hbm_temp and int(hbm_temp) > 0:
+                npu["HBM温度"] = f"{hbm_temp} C"
+            if total_ddr and int(total_ddr) > 0:
                 npu["DDR总容量"] = self._format_mb(int(total_ddr))
-            if ddr_cap:
+            if ddr_cap and int(ddr_cap) > 0:
                 npu["DDR容量"] = self._format_mb(int(ddr_cap))
-            if ddr_clock:
+            if ddr_clock and int(ddr_clock) > 0:
                 npu["DDR频率"] = f"{ddr_clock} MHz"
 
         # product信息: 产品类型 (如 Atlas 300I Duo)
@@ -187,28 +247,44 @@ class NPUInfoCollector:
         if usage_info:
             aicore = self._extract_field(usage_info, r'Aicore\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
             aicpu = self._extract_field(usage_info, r'Aicpu\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
+            ctrl_cpu = self._extract_field(usage_info, r'Ctrlcpu\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
             ddr_usage = self._extract_field(usage_info, r'DDR\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
             ddr_bw = self._extract_field(usage_info, r'DDR\s*Bandwidth\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
+            hbm_usage = self._extract_field(usage_info, r'HBM\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
+            hbm_bw = self._extract_field(usage_info, r'HBM\s*Bandwidth\s*Usage\s*Rate\(%\)\s*:\s*(\d+)')
             if aicore:
                 npu["AICore利用率"] = f"{aicore}%"
             if aicpu:
                 npu["AiCPU利用率"] = f"{aicpu}%"
+            if ctrl_cpu:
+                npu["CtrlCPU利用率"] = f"{ctrl_cpu}%"
             if ddr_usage:
                 npu["DDR使用率"] = f"{ddr_usage}%"
             if ddr_bw:
                 npu["DDR带宽使用率"] = f"{ddr_bw}%"
+            if hbm_usage:
+                npu["HBM使用率"] = f"{hbm_usage}%"
+            if hbm_bw:
+                npu["HBM带宽使用率"] = f"{hbm_bw}%"
 
     def _run_npu_smi_type(self, type_name: str, card_id: str, chip_id: str) -> Optional[str]:
-        """运行npu-smi info -t type -i card -c chip"""
-        try:
-            result = subprocess.run(
-                ['npu-smi', 'info', '-t', type_name, '-i', str(card_id), '-c', str(chip_id)],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
+        """运行npu-smi info -t type -i card [-c chip]
+        部分设备(如Ascend 950单芯片)不支持-c参数, 自动降级为仅-i重试
+        """
+        arg_variants = [
+            ['npu-smi', 'info', '-t', type_name, '-i', str(card_id), '-c', str(chip_id)],
+            ['npu-smi', 'info', '-t', type_name, '-i', str(card_id)],
+        ]
+        for args in arg_variants:
+            try:
+                result = subprocess.run(args, capture_output=True, text=True, timeout=10)
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return None
+            if result.returncode != 0:
+                continue
+            # 不支持该参数/子命令时npu-smi返回提示文本(不含字段冒号), 降级重试
+            if result.stdout and ':' in result.stdout and 'does not support' not in result.stdout:
                 return result.stdout
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
         return None
 
     def _extract_field(self, text: str, pattern: str, flags: int = 0) -> Optional[str]:
