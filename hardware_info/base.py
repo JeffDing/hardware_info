@@ -5,6 +5,7 @@
 
 from enum import Enum
 from typing import Dict, Any
+import re
 
 
 class HardwareType(Enum):
@@ -67,6 +68,26 @@ def format_size(size_in_bytes: int) -> str:
         return f"{size_in_bytes / KB:.2f} KB"
     else:
         return f"{size_in_bytes} B"
+
+
+def parse_size_to_bytes(size_str: str) -> int:
+    """把 '16 GB' / '16384MB' / '476G' / '1.8T' 之类的容量字符串转换为字节数"""
+    if not size_str:
+        return 0
+    match = re.match(r'^\s*(\d+(?:\.\d+)?)\s*([KMGT]?I?B?)\s*$', size_str, re.IGNORECASE)
+    if not match:
+        return 0
+    value = float(match.group(1))
+    unit = match.group(2).upper().replace("I", "")
+    factors = {
+        "": 1,
+        "B": 1,
+        "KB": 1024,
+        "MB": 1024 ** 2,
+        "GB": 1024 ** 3,
+        "TB": 1024 ** 4,
+    }
+    return int(value * factors.get(unit, 1))
 
 
 def run_command(cmd: list, timeout: int = 5) -> tuple:

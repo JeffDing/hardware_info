@@ -26,6 +26,7 @@ class HardwareInfoCollector:
         self.npu_info: List[Dict[str, str]] = []
         self.memory_info: Dict[str, Any] = {}
         self.disk_info: List[Dict[str, Any]] = []
+        self.disk_summary: Dict[str, Any] = {}
         self.network_info: List[Dict[str, Any]] = []
         self.ip_info: Dict[str, Any] = {}
 
@@ -51,7 +52,9 @@ class HardwareInfoCollector:
         self.memory_info = MemoryInfoCollector().collect()
 
         # 磁盘信息
-        self.disk_info = DiskInfoCollector().collect()
+        disk_collector = DiskInfoCollector()
+        self.disk_info = disk_collector.collect()
+        self.disk_summary = disk_collector.summary
 
         # 网络信息
         self.network_info = NetworkInfoCollector().collect()
@@ -70,6 +73,7 @@ class HardwareInfoCollector:
             "npu": self.npu_info,
             "memory": self.memory_info,
             "disk": self.disk_info,
+            "disk_summary": self.disk_summary,
             "network": self.network_info,
             "ip": self.ip_info
         }
@@ -174,6 +178,10 @@ class HardwareInfoCollector:
 
         # 磁盘信息
         lines.append("\n## 硬盘信息\n")
+        for key, value in self.disk_summary.items():
+            lines.append(f"| {key} | {value} |")
+        if self.disk_info:
+            lines.append("")
         for i, disk in enumerate(self.disk_info, 1):
             lines.append(f"### 设备 {i}\n")
             for key, value in disk.items():

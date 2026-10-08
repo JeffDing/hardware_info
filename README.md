@@ -12,8 +12,8 @@
 | **CPU信息** | Intel、AMD、海光、兆芯、飞腾、鲲鹏等 |
 | **GPU信息** | NVIDIA、AMD、Intel、摩尔线程、壁仞科技、沐曦、天数智芯、海光 |
 | **NPU信息** | 华为昇腾（Ascend 910/950/310P） |
-| **内存信息** | 总内存、可用内存、内存条详细信息 |
-| **磁盘信息** | 分区信息、磁盘物理信息、SMART数据 |
+| **内存信息** | 总内存、可用内存、内存条数量、物理内存总容量、每根容量、内存条详细信息 |
+| **磁盘信息** | 分区信息、硬盘数量、硬盘总容量、每块容量、磁盘物理信息、SMART数据 |
 | **网络信息** | IP地址、MAC地址、网卡驱动、网络统计 |
 
 ### 国产GPGPU详细信息支持
@@ -32,6 +32,12 @@
 - Linux / Windows / macOS
 
 ### 依赖包
+
+```bash
+pip install -r requirements.txt
+```
+
+或手动安装：
 
 ```bash
 pip install psutil requests
@@ -130,6 +136,7 @@ hardware_info/
 └── network_info.py      # 网络信息模块
 
 main.py                  # 主程序入口
+requirements.txt         # 依赖包清单
 README.md                # 说明文档
 ```
 
@@ -142,8 +149,8 @@ README.md                # 说明文档
 | `cpu_info.py` | CPU信息收集（含国产CPU厂商识别） |
 | `gpu_info.py` | GPU信息收集（支持壁仞、沐曦等详细信息） |
 | `npu_info.py` | NPU信息收集（华为昇腾910/950/310P） |
-| `memory_info.py` | 内存信息收集（含内存条详细信息） |
-| `disk_info.py` | 磁盘信息收集（支持SMART数据） |
+| `memory_info.py` | 内存信息收集（含内存条数量、物理总容量、每根容量及内存条详细信息） |
+| `disk_info.py` | 磁盘信息收集（含硬盘数量、总容量、每块容量、SMART数据） |
 | `network_info.py` | 网络信息收集（含驱动信息） |
 | `collector.py` | 主收集器，整合所有模块 |
 

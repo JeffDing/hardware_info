@@ -1,0 +1,5 @@
+# 硬件信息查询工具 依赖包清单
+# Python 3.7+，安装: pip install -r requirements.txt
+
+psutil>=5.9.0      # 硬件信息采集（CPU/内存/磁盘/网络）
+requests>=2.28.0   # IP 地理位置查询（可选，失败不影响其他功能）
