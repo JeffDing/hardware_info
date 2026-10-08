@@ -94,7 +94,7 @@ class MemoryInfoCollector:
         return match.group(1).strip() if match else None
 
     def _add_memory_summary(self, memory_details: List[Dict[str, str]]):
-        """根据内存条明细添加汇总统计：物理总容量、内存条数量、每根容量"""
+        """根据内存条明细添加汇总统计：物理总容量、内存条数量、每根容量、厂商与型号"""
         total_bytes = sum(self._size_to_bytes(mem.get("容量", "")) for mem in memory_details)
         count = len(memory_details)
 
@@ -102,12 +102,38 @@ class MemoryInfoCollector:
         size_counter = Counter(mem.get("容量", "未知") for mem in memory_details)
         config = ", ".join(f"{size} x {num}" for size, num in size_counter.most_common())
 
-        self.info.update({
+        summary: Dict[str, Any] = {
             "内存条数量": f"{count} 根",
             "物理内存总容量": format_size(total_bytes),
             "内存配置": config,
-            "内存详细信息": memory_details
-        })
+        }
+
+        # 厂商/型号汇总（过滤 Unknown/Not Specified 等无效值，缺失则不展示）
+        vendor_config = self._distribution_string(
+            mem.get("制造商") for mem in memory_details
+        )
+        model_config = self._distribution_string(
+            mem.get("部件号") for mem in memory_details
+        )
+        if vendor_config:
+            summary["内存厂商"] = vendor_config
+        if model_config:
+            summary["内存型号"] = model_config
+
+        summary["内存详细信息"] = memory_details
+        self.info.update(summary)
+
+    @staticmethod
+    def _distribution_string(values) -> str:
+        """把 [Samsung, Samsung, Hynix] 这类值序列统计为 'Samsung x 2, Hynix x 1'"""
+        counter = Counter(
+            str(v).strip() for v in values
+            if v and str(v).strip() and str(v).strip().lower()
+            not in ("未知", "unknown", "not specified", "none")
+        )
+        if not counter:
+            return ""
+        return ", ".join(f"{name} x {num}" for name, num in counter.most_common())
 
     @staticmethod
     def _size_to_bytes(size_str: str) -> int:

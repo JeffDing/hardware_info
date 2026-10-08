@@ -12,6 +12,7 @@ import socket
 from typing import List, Dict, Any, Optional
 
 from .base import format_size
+from .vendor_db import pci_vendor_name, strip_vendor_prefix, lookup_oui
 
 
 class IPGeolocationService:
@@ -183,8 +184,17 @@ class IPGeolocationService:
 class NetworkInfoCollector:
     """网络信息收集器"""
 
+    # lspci 输出行匹配（网卡类: 0200 以太网 / 0207 InfiniBand / 0280 无线）
+    _LSPCI_NIC_RE = re.compile(
+        r'^(?P<addr>[\da-f]{2}:[\da-f]{2}\.[\da-f])\s+'
+        r'(?P<desc>.+?)\s+\[(?P<class_id>0200|0207|0280)\]:\s+'
+        r'(?P<device>.+?)\s+\[(?P<vendor_id>[\da-f]{4}):(?P<device_id>[\da-f]{4})\]\s*$',
+        re.IGNORECASE
+    )
+
     def __init__(self):
         self.interfaces: List[Dict[str, Any]] = []
+        self._pci_nics: List[Dict[str, str]] = []
 
     def collect(self) -> List[Dict[str, Any]]:
         """收集网络信息"""
@@ -213,6 +223,12 @@ class NetworkInfoCollector:
         if platform.system() == "Linux":
             self._add_sysfs_info()
             self._add_driver_info()
+
+        # 网卡厂商/型号信息（Linux走PCI/OUI识别，Windows走wmic；Windows/macOS失败时仅填未知）
+        if platform.system() == "Linux":
+            self._add_pci_vendor_info()
+        elif platform.system() == "Windows":
+            self._add_windows_nic_vendor_info()
 
         # 物理网卡优先排序
         self._sort_interfaces()
@@ -389,6 +405,161 @@ class NetworkInfoCollector:
                             interface["驱动程序"] = output.split('/')[-1]
                 except (subprocess.TimeoutExpired, FileNotFoundError):
                     pass
+
+    def _add_pci_vendor_info(self):
+        """为每个网卡接口补充厂商/型号（sysfs PCI ID + lspci + MAC OUI 多级识别）
+
+        仅新增"厂商"/"型号"两个字段并插入到"接口名称"之后，
+        不改动其他字段的含义与顺序，对虚拟网卡安全降级为"未知"。
+        """
+        if not self._pci_nics:
+            self._pci_nics = self._load_pci_nics()
+
+        for interface in self.interfaces:
+            name = interface.get("接口名称", "")
+            vendor, model = self._detect_nic_vendor(name, interface.get("MAC地址", ""))
+            self._attach_vendor_fields(interface, vendor, model)
+
+    def _load_pci_nics(self) -> List[Dict[str, str]]:
+        """运行一次 lspci -nn，解析网卡类设备（运行失败返回空列表）"""
+        try:
+            result = subprocess.run(['lspci', '-nn'],
+                                    capture_output=True, text=True, timeout=5)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
+        if result.returncode != 0:
+            return []
+        return self._parse_lspci_nics(result.stdout)
+
+    def _parse_lspci_nics(self, output: str) -> List[Dict[str, str]]:
+        """解析 lspci -nn 输出中的网卡设备（以太网/IB/无线）"""
+        nics: List[Dict[str, str]] = []
+        for line in output.splitlines():
+            match = self._LSPCI_NIC_RE.match(line.strip())
+            if not match:
+                continue
+            device_desc = match.group('device').strip()
+            vendor_id = f"0x{match.group('vendor_id').lower()}"
+            vendor = pci_vendor_name(vendor_id) or self._clean_desc_vendor(device_desc)
+            if not vendor:
+                vendor = vendor_id
+            model = strip_vendor_prefix(device_desc, vendor)
+            nics.append({
+                "vendor_id": vendor_id,
+                "device_id": f"0x{match.group('device_id').lower()}",
+                "vendor": vendor,
+                "model": model or device_desc,
+            })
+        return nics
+
+    @staticmethod
+    def _clean_desc_vendor(desc: str) -> str:
+        """从 lspci 描述文本推断厂商名（vendor ID 无映射时的兜底）"""
+        desc_lower = desc.lower()
+        for keyword, name in (
+            ("intel", "Intel"), ("mellanox", "NVIDIA (Mellanox)"), ("nvidia", "NVIDIA"),
+            ("realtek", "Realtek (瑞昱)"), ("broadcom", "Broadcom (博通)"),
+            ("huawei", "华为 (Huawei/HiSilicon)"), ("hisilicon", "华为 (Huawei/HiSilicon)"),
+            ("atheros", "Qualcomm Atheros"), ("qualcomm", "Qualcomm Atheros"),
+            ("aquantia", "Aquantia"), ("qlogic", "QLogic"), ("emulex", "Emulex (Broadcom)"),
+            ("chelsio", "Chelsio"), ("vmware", "VMware"), ("virtio", "Red Hat (Virtio)"),
+            ("amazon", "Amazon (AWS)"), ("oracle", "Oracle (Sun)"), ("sun ", "Oracle (Sun)"),
+        ):
+            if keyword in desc_lower:
+                return name
+        return ""
+
+    def _detect_nic_vendor(self, name: str, mac: str):
+        """识别单个网卡的厂商与型号
+
+        识别顺序:
+        1. sysfs 的 PCI vendor/device ID 匹配 lspci 网卡列表（最准确）
+        2. sysfs PCI vendor ID 查内置 PCI 厂商表
+        3. MAC 地址 OUI 查内置厂商表（容器/虚拟机环境常用）
+        识别不到时返回 ("未知", "未知")，不影响其他字段
+        """
+        vendor_id = self._read_pci_id(f'/sys/class/net/{name}/device/vendor')
+        device_id = self._read_pci_id(f'/sys/class/net/{name}/device/device')
+
+        if vendor_id:
+            # 1. sysfs ID 与 lspci 列表精确匹配
+            if device_id:
+                for nic in self._pci_nics:
+                    if nic["vendor_id"] == vendor_id and nic["device_id"] == device_id:
+                        return nic["vendor"], nic["model"]
+            # 2. sysfs vendor ID 查内置表
+            vendor = pci_vendor_name(vendor_id)
+            if vendor:
+                model = f"PCI设备 {vendor_id}:{device_id}" if device_id else f"PCI设备 {vendor_id}"
+                return vendor, model
+            return vendor_id, f"PCI设备 {vendor_id}:{device_id}" if device_id else vendor_id
+
+        # 3. MAC OUI 识别（虚拟网卡常见）
+        oui_vendor = lookup_oui(mac)
+        if oui_vendor:
+            return oui_vendor, "虚拟网卡"
+
+        return "未知", "未知"
+
+    @staticmethod
+    def _read_pci_id(path: str) -> Optional[str]:
+        """读取 sysfs 中的 PCI vendor/device ID（如 '0x8086'）"""
+        try:
+            with open(path, 'r') as f:
+                value = f.read().strip().lower()
+            return value if re.match(r'^0x[\da-f]{4}$', value) else None
+        except (IOError, OSError):
+            return None
+
+    @staticmethod
+    def _attach_vendor_fields(interface: Dict[str, Any], vendor: str, model: str):
+        """把"厂商"/"型号"插入到"接口名称"之后，保持报告列顺序稳定"""
+        ordered = {
+            "接口名称": interface.get("接口名称", "未知"),
+            "厂商": vendor,
+            "型号": model,
+        }
+        for key, value in interface.items():
+            if key != "接口名称":
+                ordered[key] = value
+        interface.clear()
+        interface.update(ordered)
+
+    def _add_windows_nic_vendor_info(self):
+        """Windows下通过wmic补充网卡厂商/型号（失败时填未知）"""
+        try:
+            result = subprocess.run(
+                ['wmic', 'nic', 'where', 'NetConnectionID!=""',
+                 'get', 'NetConnectionID,Manufacturer,Name,ProductName'],
+                capture_output=True, text=True, timeout=10
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            self._fill_unknown_vendors()
+            return
+
+        vendor_by_conn = {}
+        if result.returncode == 0:
+            for line in result.stdout.splitlines()[1:]:
+                if not line.strip():
+                    continue
+                parts = re.split(r'\s{2,}|\t', line.strip())
+                if len(parts) < 2:
+                    continue
+                conn_id = parts[0]
+                manufacturer = parts[1] if len(parts) > 1 else "未知"
+                name = parts[-1] if len(parts) > 2 else "未知"
+                if conn_id:
+                    vendor_by_conn[conn_id] = (manufacturer or "未知", name or "未知")
+
+        for interface in self.interfaces:
+            name = interface.get("接口名称", "")
+            vendor, model = vendor_by_conn.get(name, ("未知", "未知"))
+            self._attach_vendor_fields(interface, vendor, model)
+
+    def _fill_unknown_vendors(self):
+        """所有平台均无法识别时填"未知"，保证字段齐全"""
+        for interface in self.interfaces:
+            self._attach_vendor_fields(interface, "未知", "未知")
 
     def _sort_interfaces(self):
         """物理网卡优先排序"""
