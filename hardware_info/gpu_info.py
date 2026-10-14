@@ -283,28 +283,189 @@ class GPUInfoCollector:
             pass
 
     def _detect_hygon(self):
-        """检测海光DCU"""
+        """检测海光DCU - 显示详细信息"""
         try:
-            result = subprocess.run(['rocm-smi', '--showproductname'], 
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                output = result.stdout
-                model_pattern = re.compile(r'Card Series:\s*(.+?)(?:\n|$)', re.IGNORECASE)
-                models = model_pattern.findall(output)
+            result = subprocess.run(['rocm-smi', '--showproductname'],
+                                   capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                return
+            output = result.stdout
+            model_pattern = re.compile(r'Card Series:\s*(.+?)(?:\n|$)', re.IGNORECASE)
+            models = model_pattern.findall(output)
 
-                for model in models:
-                    model = model.strip()
-                    if model and model not in ["", "N/A"]:
-                        model_key = f"海光-{model}"
-                        if model_key not in self._seen_models:
-                            self.gpus.append({
-                                "厂商": "海光",
-                                "型号": model,
-                                "类型": "GPGPU"
-                            })
-                            self._seen_models.add(model_key)
+            details = self._collect_hygon_dcu_details()
+
+            for model in models:
+                model = model.strip()
+                if model and model not in ["", "N/A"]:
+                    model_key = f"海光-{model}"
+                    if model_key not in self._seen_models:
+                        self.gpus.append({
+                            "厂商": "海光",
+                            "型号": model,
+                            "类型": "GPGPU",
+                            **details
+                        })
+                        self._seen_models.add(model_key)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
+
+    def _collect_hygon_dcu_details(self) -> Dict[str, str]:
+        """收集海光DCU详细信息，合并多个rocm-smi命令的输出"""
+        details: Dict[str, str] = {}
+        cmd = [
+            'rocm-smi',
+            '--showallinfo',
+            '--showmeminfo', 'all',
+            '--showmemvendor',
+            '--showmemdc',
+            '--showfwinfo',
+            '--showserial',
+            '--showbus',
+            '--showperflevel',
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                details = self._parse_hygon_dcu_details(result.stdout)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        return details
+
+    def _parse_hygon_dcu_details(self, output: str) -> Dict[str, str]:
+        """解析海光DCU详细信息"""
+        details: Dict[str, str] = {}
+
+        # Device ID
+        device_id_match = re.search(r'Device ID:\s*(0x[0-9a-fA-F]+)', output)
+        if device_id_match:
+            details["设备ID"] = device_id_match.group(1)
+
+        # VBIOS版本
+        vbios_match = re.search(r'VBIOS version:\s*(.+)', output)
+        if vbios_match:
+            details["VBIOS版本"] = vbios_match.group(1).strip()
+
+        # 温度 (Edge/Junction/Mem/Core)
+        temp_patterns = {
+            "温度(Edge)": r'Temperature \(Sensor edge\) \(C\):\s*([\d.]+)',
+            "温度(Junction)": r'Temperature \(Sensor junction\) \(C\):\s*([\d.]+)',
+            "温度(Memory)": r'Temperature \(Sensor mem\) \(C\):\s*([\d.]+)',
+            "温度(Core)": r'Temperature \(Sensor core\) \(C\):\s*([\d.]+)',
+        }
+        for key, pat in temp_patterns.items():
+            m = re.search(pat, output)
+            if m:
+                details[key] = f"{m.group(1)}°C"
+
+        # 时钟频率
+        clock_patterns = {
+            "FCLK频率": r'fclk clock level:\s*\d+\s*\(([\d.]+)Mhz\)',
+            "MCLK频率": r'mclk clock level:\s*\d+\s*\(([\d.]+)Mhz\)',
+            "SCLK频率": r'sclk clock level:\s*\d+\s*\(([\d.]+)Mhz\)',
+            "SOCCLK频率": r'socclk clock level:\s*\d+\s*\(([\d.]+)Mhz\)',
+        }
+        for key, pat in clock_patterns.items():
+            m = re.search(pat, output)
+            if m:
+                details[key] = f"{m.group(1)} MHz"
+
+        # PCIe速度
+        pcie_match = re.search(r'pcie clock level:\s*\d+\s*\(([\d.]+)GT/s', output)
+        if pcie_match:
+            details["PCIe速度"] = f"{pcie_match.group(1)} GT/s"
+
+        # 功耗
+        power_max_match = re.search(r'Max Graphics Package Power \(W\):\s*([\d.]+)', output)
+        if power_max_match:
+            details["功耗上限"] = f"{power_max_match.group(1)} W"
+        power_avg_match = re.search(r'Average Graphics Package Power \(W\):\s*([\d.]+)', output)
+        if power_avg_match:
+            details["功耗"] = f"{power_avg_match.group(1)} W"
+
+        # 利用率
+        hcu_use_match = re.search(r'HCU use \(%\):\s*([\d.]+)', output)
+        if hcu_use_match:
+            details["HCU利用率"] = f"{hcu_use_match.group(1)}%"
+        hcu_mem_match = re.search(r'HCU memory use \(%\):\s*(\d+)', output)
+        if hcu_mem_match:
+            details["显存利用率"] = f"{hcu_mem_match.group(1)}%"
+
+        # 内存信息 - VRAM
+        vram_total_match = re.search(r'vram Total Memory \(MiB\):\s*(\d+)', output)
+        vram_used_match = re.search(r'vram Total Used Memory \(MiB\):\s*(\d+)', output)
+        if vram_total_match:
+            vram_total_mib = int(vram_total_match.group(1))
+            vram_used = int(vram_used_match.group(1)) if vram_used_match else 0
+            if vram_total_mib >= 1024:
+                details["显存"] = f"{vram_total_mib / 1024:.0f} GB ({vram_used} MiB已使用)"
+            else:
+                details["显存"] = f"{vram_total_mib} MB ({vram_used} MiB已使用)"
+
+        # GTT内存
+        gtt_match = re.search(r'gtt Total Memory \(MiB\):\s*(\d+)', output)
+        if gtt_match:
+            gtt_mib = int(gtt_match.group(1))
+            details["GTT内存"] = f"{gtt_mib / 1024:.0f} GB" if gtt_mib >= 1024 else f"{gtt_mib} MB"
+
+        # vis_vram
+        vis_vram_match = re.search(r'vis_vram Total Memory \(MiB\):\s*(\d+)', output)
+        if vis_vram_match:
+            vis_vram_mib = int(vis_vram_match.group(1))
+            details["VIS VRAM"] = f"{vis_vram_mib / 1024:.0f} GB" if vis_vram_mib >= 1024 else f"{vis_vram_mib} MB"
+
+        # 可用显存
+        avail_match = re.search(r'Available memory size \(MiB\):\s*(\d+)', output)
+        if avail_match:
+            avail_mib = int(avail_match.group(1))
+            details["可用显存"] = f"{avail_mib / 1024:.0f} GB" if avail_mib >= 1024 else f"{avail_mib} MB"
+
+        # 显存颗粒厂商
+        mem_vendor_match = re.search(r'HCU Memory Vendor:\s*(.+)', output)
+        if mem_vendor_match:
+            details["显存颗粒厂商"] = mem_vendor_match.group(1).strip()
+
+        # 显存颗粒日期码
+        mem_dc_match = re.search(r'HCU Memory Date Code:\s*(.+)', output)
+        if mem_dc_match:
+            details["显存颗粒日期码"] = mem_dc_match.group(1).strip()
+
+        # 序列号
+        serial_match = re.search(r'Serial Number:\s*(.+)', output)
+        if serial_match:
+            details["序列号"] = serial_match.group(1).strip()
+
+        # PCI总线
+        bus_match = re.search(r'PCI Bus:\s*(.+)', output)
+        if bus_match:
+            details["PCI总线"] = bus_match.group(1).strip()
+
+        # 电压 (mV -> V)
+        voltage_match = re.search(r'Voltage \(mV\):\s*([\d]+)', output)
+        if voltage_match:
+            voltage_mv = int(voltage_match.group(1))
+            details["电压"] = f"{voltage_mv / 1000:.3f} V"
+
+        # 性能等级
+        perf_match = re.search(r'Performance Level:\s*(\w+)', output)
+        if perf_match:
+            details["性能等级"] = perf_match.group(1).strip()
+
+        # 固件版本
+        fw_patterns = {
+            "MEC固件": r'MEC\s+Firmware Version:\s*(\S+)',
+            "MEC2固件": r'MEC2\s+Firmware Version:\s*(\S+)',
+            "RLC固件": r'RLC\s+Firmware Version:\s*(\S+)',
+            "SDMA固件": r'SDMA\s+Firmware Version:\s*(\S+)',
+            "SDMA2固件": r'SDMA2\s+Firmware Version:\s*(\S+)',
+            "SMC固件": r'SMC\s+Firmware Version:\s*(\S+)',
+        }
+        for key, pat in fw_patterns.items():
+            m = re.search(pat, output)
+            if m:
+                details[key] = m.group(1).strip()
+
+        return details
 
     def _detect_nvidia(self):
         """检测NVIDIA GPU"""

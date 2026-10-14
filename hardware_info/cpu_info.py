@@ -71,6 +71,21 @@ class CPUInfoCollector:
             # 提取缓存信息
             self._extract_cache_info(cpuinfo)
 
+            # 提取CPU family
+            family_match = re.search(r'cpu family\s*:\s*(\d+)', cpuinfo)
+            if family_match:
+                self.info["CPU family"] = family_match.group(1).strip()
+
+            # 提取stepping
+            stepping_match = re.search(r'stepping\s*:\s*(\d+)', cpuinfo)
+            if stepping_match:
+                self.info["Stepping"] = stepping_match.group(1).strip()
+
+            # 提取虚拟化类型
+            virt_match = re.search(r'Virtualization:\s*(\S+)', cpuinfo)
+            if virt_match:
+                self.info["虚拟化类型"] = virt_match.group(1).strip()
+
         except (FileNotFoundError, IOError):
             pass
 
@@ -105,8 +120,10 @@ class CPUInfoCollector:
             self.info["厂商"] = "Qualcomm"
         elif "HUAWEI" in model_upper or "KUNPENG" in model_upper or "鲲鹏" in model or "海思" in model:
             self.info["厂商"] = "HiSilicon (海思)"
+            self._identify_hygon_c86_series(model)
         elif "HYGON" in model_upper or "海光" in model:
             self.info["厂商"] = "Hygon (海光)"
+            self._identify_hygon_c86_series(model)
         elif "ZHAOXIN" in model_upper or "兆芯" in model:
             self.info["厂商"] = "Zhaoxin (兆芯)"
         elif "CENTAUR" in model_upper or "VIA" in model_upper or "威盛" in model:
@@ -153,6 +170,17 @@ class CPUInfoCollector:
                 self.info["厂商"] = vendor
             self.info["型号"] = model
 
+    def _identify_hygon_c86_series(self, model: str):
+        """识别海光C86系列型号并更新self.info"""
+        c86_match = re.search(r'C86\s+(\d{4})', model)
+        if c86_match:
+            model_number = c86_match.group(1)
+            self.info["型号"] = f"C86 {model_number}"
+            self.info["型号系列"] = "C86系列"
+            self.info["型号编号"] = model_number
+        else:
+            self.info["型号"] = model.strip()
+
     def _extract_cache_info(self, cpuinfo: str):
         """提取缓存信息"""
         cache_patterns = {
@@ -181,7 +209,7 @@ class CPUInfoCollector:
                 self.info["厂商"] = "AMD"
             elif vendor_id == "ARM":
                 self.info["厂商"] = "ARM"
-            elif vendor_id_upper in ["HYGON", "海光"]:
+            elif "HYGON" in vendor_id_upper or "海光" in vendor_id_upper:
                 self.info["厂商"] = "Hygon (海光)"
             elif vendor_id_upper in ["ZHAOXIN", "兆芯"]:
                 self.info["厂商"] = "Zhaoxin (兆芯)"
@@ -205,6 +233,16 @@ class CPUInfoCollector:
         if min_freq_match:
             min_freq = float(min_freq_match.group(1))
             self.info["最小频率"] = f"{min_freq/1000:.2f} GHz"
+
+        # 提取BogoMIPS
+        bogo_match = re.search(r'BogoMIPS:\s*([\d.]+)', output)
+        if bogo_match:
+            self.info["BogoMIPS"] = bogo_match.group(1).strip()
+
+        # 提取NUMA节点数
+        numa_match = re.search(r'NUMA node\(s\):\s*(\d+)', output)
+        if numa_match:
+            self.info["NUMA节点数"] = numa_match.group(1).strip()
 
     def _parse_dmidecode_output(self, output: str):
         """解析dmidecode输出"""

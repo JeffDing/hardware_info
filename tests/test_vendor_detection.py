@@ -2,6 +2,7 @@
 """硬件厂商/型号识别单元测试（标准库 unittest，可直接 python3 -m unittest 发现）"""
 
 import os
+import re
 import sys
 import unittest
 from unittest.mock import patch
@@ -198,6 +199,199 @@ class TestMemorySummary(unittest.TestCase):
         collector._add_memory_summary(details)
         self.assertNotIn("内存厂商", collector.info)
         self.assertNotIn("内存型号", collector.info)
+
+
+class TestHygonCPUDetect(unittest.TestCase):
+    """海光CPU检测测试"""
+
+    def test_hygon_c86_series_identification(self):
+        """C86型号系列识别"""
+        from hardware_info.cpu_info import CPUInfoCollector
+        collector = CPUInfoCollector()
+        collector._extract_vendor_from_model("Hygon C86 7185 32-core Processor")
+        self.assertEqual(collector.info["厂商"], "Hygon (海光)")
+        self.assertEqual(collector.info["型号"], "C86 7185")
+        self.assertEqual(collector.info["型号系列"], "C86系列")
+        self.assertEqual(collector.info["型号编号"], "7185")
+
+    def test_hygon_c86_model_variants(self):
+        """C86不同型号变体识别"""
+        from hardware_info.cpu_info import CPUInfoCollector
+        test_models = [
+            ("Hygon C86 7160 32-core Processor", "C86 7160", "7160"),
+            ("Hygon C86 7280 32-core Processor", "C86 7280", "7280"),
+            ("Hygon C86 3240 16-core Processor", "C86 3240", "3240"),
+            ("Hygon C86 7285 32-core Processor", "C86 7285", "7285"),
+        ]
+        for full_model, expected_model, expected_num in test_models:
+            collector = CPUInfoCollector()
+            collector._extract_vendor_from_model(full_model)
+            self.assertEqual(collector.info["厂商"], "Hygon (海光)")
+            self.assertEqual(collector.info["型号"], expected_model)
+            self.assertEqual(collector.info["型号编号"], expected_num)
+
+    def test_hygon_lscpu_parsing(self):
+        """lscpu输出中海光字段解析"""
+        lscpu_output = (
+            "Vendor ID:             HygonGenuine\n"
+            "Model:                 0\n"
+            "Model name:            Hygon C86 7185 32-core Processor\n"
+            "Stepping:              1\n"
+            "CPU max MHz:           2000.0000\n"
+            "BogoMIPS:              4000.00\n"
+            "NUMA node(s):          4\n"
+        )
+        from hardware_info.cpu_info import CPUInfoCollector
+        collector = CPUInfoCollector()
+        collector._parse_lscpu_output(lscpu_output)
+        self.assertEqual(collector.info["厂商"], "Hygon (海光)")
+        self.assertEqual(collector.info["型号"], "Hygon C86 7185 32-core Processor")
+        self.assertEqual(collector.info["BogoMIPS"], "4000.00")
+        self.assertEqual(collector.info["NUMA节点数"], "4")
+
+    def test_hygon_proc_cpuinfo_fields(self):
+        """/proc/cpuinfo中海光字段提取"""
+        cpuinfo = (
+            "vendor_id\t: HygonGenuine\n"
+            "cpu family\t: 24\n"
+            "model\t\t: 0\n"
+            "model name\t: Hygon C86 7185 32-core Processor\n"
+            "stepping\t: 1\n"
+            "Virtualization: AMD-V\n"
+        )
+        family_match = re.search(r'cpu family\s*:\s*(\d+)', cpuinfo)
+        self.assertEqual(family_match.group(1), "24")
+        stepping_match = re.search(r'stepping\s*:\s*(\d+)', cpuinfo)
+        self.assertEqual(stepping_match.group(1), "1")
+        virt_match = re.search(r'Virtualization:\s*(\S+)', cpuinfo)
+        self.assertEqual(virt_match.group(1), "AMD-V")
+
+
+class TestHygonDCUDetect(unittest.TestCase):
+    """海光DCU检测测试"""
+
+    FAKE_ROCM_SMI_PRODUCTNAME = (
+        "GPU ID\t\t: 0x7319\n"
+        "Card Series:\t\t K500SM_AI\n"
+        "Card Vendor:\t\t Chengdu C-3000 IC Design Co., Ltd.\n"
+        "Card Model:\t\t K500SM-AI\n"
+    )
+
+    FAKE_ROCM_SMI_ALLINFO = (
+        "GPU ID: 0000:43:00.0\n"
+        "Device ID: 0x6210\n"
+        "VBIOS version: 5.715.001000p.618009\n"
+        "Temperature (Sensor edge) (C): 53.0\n"
+        "Temperature (Sensor junction) (C): 51.0\n"
+        "Temperature (Sensor mem) (C): 54.0\n"
+        "Temperature (Sensor core) (C): 51.0\n"
+        "fclk clock level: 0 (1250Mhz)\n"
+        "mclk clock level: 0 (875Mhz)\n"
+        "sclk clock level: 8 (1270Mhz)\n"
+        "socclk clock level: 0 (971Mhz)\n"
+        "pcie clock level: 1 (8.0GT/s, x16 308Mhz)\n"
+        "Performance Level: manual\n"
+        "Max Graphics Package Power (W): 300.0\n"
+        "Average Graphics Package Power (W): 137.0\n"
+        "HCU use (%): 0.0\n"
+        "HCU memory use (%): 0\n"
+        "HCU Memory Vendor: samsung c-die\n"
+        "HCU Memory Date Code: unknown\n"
+        "Serial Number: TRYU380012090401\n"
+        "PCI Bus: 0000:43:00.0\n"
+        "Voltage (mV): 893\n"
+        "MEC Firmware Version: 49\n"
+        "MEC2 Firmware Version: 49\n"
+        "RLC Firmware Version: 6\n"
+        "SDMA Firmware Version: 14\n"
+        "SDMA2 Firmware Version: 14\n"
+        "SMC Firmware Version: 00.15.07.00\n"
+        "gtt Total Memory (MiB): 257862\n"
+        "vis_vram Total Memory (MiB): 65520\n"
+        "vram Total Memory (MiB): 65520\n"
+        "vram Total Used Memory (MiB): 2\n"
+        "Available memory size (MiB): 65469\n"
+    )
+
+    def test_hygon_productname_detection(self):
+        """rocm-smi --showproductname 海光型号检测"""
+        from hardware_info.gpu_info import GPUInfoCollector
+        collector = GPUInfoCollector()
+        model_pattern = re.compile(r'Card Series:\s*(.+?)(?:\n|$)', re.IGNORECASE)
+        models = model_pattern.findall(self.FAKE_ROCM_SMI_PRODUCTNAME)
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].strip(), "K500SM_AI")
+
+    def test_hygon_dcu_details_parsing(self):
+        """海光DCU详细信息解析"""
+        from hardware_info.gpu_info import GPUInfoCollector
+        collector = GPUInfoCollector()
+        details = collector._parse_hygon_dcu_details(self.FAKE_ROCM_SMI_ALLINFO)
+
+        self.assertEqual(details["设备ID"], "0x6210")
+        self.assertEqual(details["VBIOS版本"], "5.715.001000p.618009")
+        self.assertEqual(details["温度(Edge)"], "53.0°C")
+        self.assertEqual(details["温度(Junction)"], "51.0°C")
+        self.assertEqual(details["温度(Memory)"], "54.0°C")
+        self.assertEqual(details["温度(Core)"], "51.0°C")
+        self.assertEqual(details["FCLK频率"], "1250 MHz")
+        self.assertEqual(details["MCLK频率"], "875 MHz")
+        self.assertEqual(details["SCLK频率"], "1270 MHz")
+        self.assertEqual(details["SOCCLK频率"], "971 MHz")
+        self.assertEqual(details["PCIe速度"], "8.0 GT/s")
+        self.assertEqual(details["性能等级"], "manual")
+        self.assertEqual(details["功耗上限"], "300.0 W")
+        self.assertEqual(details["功耗"], "137.0 W")
+        self.assertEqual(details["HCU利用率"], "0.0%")
+        self.assertEqual(details["显存利用率"], "0%")
+        self.assertIn("64 GB", details["显存"])
+        self.assertIn("252 GB", details["GTT内存"])
+        self.assertIn("64 GB", details["VIS VRAM"])
+        self.assertIn("64 GB", details["可用显存"])
+        self.assertEqual(details["显存颗粒厂商"], "samsung c-die")
+        self.assertEqual(details["显存颗粒日期码"], "unknown")
+        self.assertEqual(details["序列号"], "TRYU380012090401")
+        self.assertEqual(details["PCI总线"], "0000:43:00.0")
+        self.assertIn("V", details["电压"])
+        self.assertEqual(details["MEC固件"], "49")
+        self.assertEqual(details["MEC2固件"], "49")
+        self.assertEqual(details["RLC固件"], "6")
+        self.assertEqual(details["SDMA固件"], "14")
+        self.assertEqual(details["SDMA2固件"], "14")
+        self.assertEqual(details["SMC固件"], "00.15.07.00")
+
+    def test_hygon_full_detection_mocked(self):
+        """Mock rocm-smi，测试完整海光DCU检测流程"""
+        from hardware_info.gpu_info import GPUInfoCollector
+        from unittest.mock import patch
+
+        fake_productname = (
+            "GPU ID\t\t: 0x7319\n"
+            "Card Series:\t\t K500SM_AI\n"
+            "Card Vendor:\t\t Chengdu C-3000 IC Design Co., Ltd.\n"
+        )
+        fake_allinfo = self.FAKE_ROCM_SMI_ALLINFO
+
+        def mock_run(cmd, **kwargs):
+            class FakeResult:
+                returncode = 0
+                if '--showproductname' in cmd:
+                    stdout = fake_productname
+                else:
+                    stdout = fake_allinfo
+            return FakeResult()
+
+        with patch('subprocess.run', side_effect=mock_run):
+            gpus = GPUInfoCollector().collect()
+
+        hygon_gpus = [g for g in gpus if g.get("厂商") == "海光"]
+        self.assertEqual(len(hygon_gpus), 1)
+        self.assertEqual(hygon_gpus[0]["型号"], "K500SM_AI")
+        self.assertEqual(hygon_gpus[0]["类型"], "GPGPU")
+        self.assertEqual(hygon_gpus[0]["设备ID"], "0x6210")
+        self.assertIn("显存", hygon_gpus[0])
+        self.assertIn("温度(Edge)", hygon_gpus[0])
+        self.assertIn("功耗", hygon_gpus[0])
 
 
 if __name__ == "__main__":
