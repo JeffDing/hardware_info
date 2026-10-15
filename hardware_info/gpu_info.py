@@ -8,7 +8,7 @@ import platform
 import subprocess
 import re
 import psutil
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 class GPUInfoCollector:
@@ -294,6 +294,7 @@ class GPUInfoCollector:
             models = model_pattern.findall(output)
 
             details = self._collect_hygon_dcu_details()
+            details.update(self._collect_hygon_dcu_rocminfo())
 
             for model in models:
                 model = model.strip()
@@ -466,6 +467,138 @@ class GPUInfoCollector:
                 details[key] = m.group(1).strip()
 
         return details
+
+    def _collect_hygon_dcu_rocminfo(self) -> Dict[str, str]:
+        """运行 rocminfo，解析 HCU (DCU) Agent 的架构级信息"""
+        details: Dict[str, str] = {}
+        try:
+            result = subprocess.run(['rocminfo'], capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                details = self._parse_rocminfo_hcu(result.stdout)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        return details
+
+    def _parse_rocminfo_hcu(self, text: str) -> Dict[str, str]:
+        """解析 rocminfo 输出中的 HCU Agent 段"""
+        details: Dict[str, str] = {}
+
+        # 定位第一个 HCU Agent 段（跳过 CPU Agent）
+        hcu_start = text.find('\n  Device Type:             HCU')
+        if hcu_start == -1:
+            return details
+
+        segment = text[hcu_start:]
+        # 段结束于下一个 "Agent N" 或文件末尾
+        next_agent = re.search(r'\n\*{7}\s*\n\s*Agent \d+', segment)
+        if next_agent:
+            segment = segment[:next_agent.start()]
+
+        # ---- 基本信息 ----
+        vendor = self._rocminfo_line(segment, r'Vendor Name:\s*(.+)')
+        if vendor:
+            details["架构厂商"] = vendor.strip()
+
+        arch_name = self._rocminfo_line(segment, r'Name:\s*(gfx\S+)')
+        if arch_name:
+            details["架构名称"] = arch_name.strip()
+
+        marketing = self._rocminfo_line(segment, r'Marketing Name:\s*(.+)')
+        if marketing:
+            details["产品代号"] = marketing.strip()
+
+        max_clock = self._rocminfo_line(segment, r'Max Clock Freq\. \(MHz\):\s*([\d.]+)')
+        if max_clock:
+            details["最大频率(rocminfo)"] = f"{max_clock.strip()} MHz"
+
+        bdfid = self._rocminfo_line(segment, r'BDFID:\s*(\S+)')
+        if bdfid:
+            details["BDFID"] = bdfid.strip()
+
+        # ---- 计算单元 ----
+        cu_count = self._rocminfo_line(segment, r'Compute Unit:\s*(\d+)')
+        if cu_count:
+            details["计算单元数"] = cu_count.strip()
+
+        simd_per_cu = self._rocminfo_line(segment, r'SIMDs per CU:\s*(\d+)')
+        if simd_per_cu:
+            details["每CU的SIMD数"] = simd_per_cu.strip()
+
+        se_count = self._rocminfo_line(segment, r'Shader Engines:\s*(\d+)')
+        if se_count:
+            details["着色器引擎数"] = se_count.strip()
+
+        wavefront = self._rocminfo_line(segment, r'Wavefront Size:\s*(\d+)')
+        if wavefront:
+            details["Wavefront大小"] = wavefront.strip()
+
+        max_waves = self._rocminfo_line(segment, r'Max Waves Per CU:\s*(\d+)')
+        if max_waves:
+            details["每CU最大Wave数"] = max_waves.strip()
+
+        # ---- 内存段 (Pool Info) ----
+        pool_sizes = re.findall(
+            r'Pool\s+\d+\s+Segment:\s*(\S+).*?Size:\s*([\d]+)\(0x[\da-fA-F]+\)\s*KB',
+            segment, re.DOTALL
+        )
+        total_pool_kb = 0
+        visible_total_kb = 0
+        for seg_type, size_kb in pool_sizes:
+            size_val = int(size_kb)
+            total_pool_kb += size_val
+            if 'COARSE' not in seg_type.upper() and 'GROUP' not in seg_type.upper():
+                visible_total_kb += size_val
+
+        if total_pool_kb > 0:
+            details["HCU总内存(rocminfo)"] = self._format_kb(total_pool_kb)
+        if visible_total_kb > 0 and visible_total_kb != total_pool_kb:
+            details["HCU可见内存(rocminfo)"] = self._format_kb(visible_total_kb)
+
+        # 列出各 Pool 段类型和容量
+        pool_lines = re.findall(
+            r'Pool\s+(\d+)\s+Segment:\s*([^\n]+?)\s+Size:\s*([\d]+)\(0x[\da-fA-F]+\)\s*KB',
+            segment
+        )
+        for pool_num, seg_type, size_kb in pool_lines:
+            seg_label = seg_type.strip()
+            if 'GLOBAL' in seg_label.upper():
+                details[f"内存池{pool_num}({seg_label})"] = self._format_kb(int(size_kb))
+            elif 'GROUP' in seg_label.upper():
+                details[f"内存池{pool_num}({seg_label})"] = f"{int(size_kb) // 1024} MB"
+
+        # ---- ISA 信息 ----
+        isa_name = self._rocminfo_isa_name(segment)
+        if isa_name:
+            details["ISA"] = isa_name
+
+        return details
+
+    @staticmethod
+    def _rocminfo_line(text: str, pattern: str) -> Optional[str]:
+        """在文本中按行级模式提取第一个匹配值"""
+        match = re.search(pattern, text)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _rocminfo_isa_name(text: str) -> Optional[str]:
+        """提取 rocminfo ISA Info 中的 Name 字段"""
+        match = re.search(r'\n\s*ISA Info:\s*\n(?:\s*\n)*\s*Name:\s*(\S+)', text)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _format_mb(mb: int) -> str:
+        """格式化 MB 为可读格式"""
+        if mb >= 1024:
+            return f"{mb / 1024:.0f} GB"
+        return f"{mb} MB"
+
+    @staticmethod
+    def _format_kb(kb: int) -> str:
+        """格式化 KB 为可读格式（同 NPUInfoCollector 逻辑）"""
+        mb = kb / 1024
+        if mb >= 1024:
+            return f"{mb / 1024:.0f} GB"
+        return f"{mb:.0f} MB"
 
     def _detect_nvidia(self):
         """检测NVIDIA GPU"""
