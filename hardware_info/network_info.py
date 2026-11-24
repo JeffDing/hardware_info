@@ -283,7 +283,7 @@ class NetworkInfoCollector:
                     match = re.search(r'default\s+via\s+(\S+)\s+dev\s+(\S+)', line)
                     if match:
                         gateway_map[match.group(2)] = match.group(1)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass
         return gateway_map
 
@@ -389,7 +389,7 @@ class NetworkInfoCollector:
                         interface["固件版本"] = firmware_match.group(1).strip()
                     if bus_match:
                         interface["总线信息"] = bus_match.group(1).strip()
-            except (subprocess.TimeoutExpired, FileNotFoundError):
+            except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
                 pass
 
             # 尝试从sysfs获取驱动信息 (ethtool不可用时的fallback)
@@ -403,7 +403,7 @@ class NetworkInfoCollector:
                         output = result.stdout.strip()
                         if output:
                             interface["驱动程序"] = output.split('/')[-1]
-                except (subprocess.TimeoutExpired, FileNotFoundError):
+                except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
                     pass
 
     def _add_pci_vendor_info(self):
@@ -425,7 +425,7 @@ class NetworkInfoCollector:
         try:
             result = subprocess.run(['lspci', '-nn'],
                                     capture_output=True, text=True, timeout=5)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             return []
         if result.returncode != 0:
             return []
@@ -533,7 +533,7 @@ class NetworkInfoCollector:
                  'get', 'NetConnectionID,Manufacturer,Name,ProductName'],
                 capture_output=True, text=True, timeout=10
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             self._fill_unknown_vendors()
             return
 

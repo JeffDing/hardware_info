@@ -68,7 +68,7 @@ class GPUInfoCollector:
                             "类型": "GPGPU"
                         })
                         self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _detect_biren(self):
@@ -94,7 +94,7 @@ class GPUInfoCollector:
                         gpu.update(gpu_details)
                         self.gpus.append(gpu)
                         self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _parse_brsmi_details(self, output: str) -> Dict[str, str]:
@@ -201,7 +201,7 @@ class GPUInfoCollector:
                         gpu.update(gpu_details)
                         self.gpus.append(gpu)
                         self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _parse_mxsmi_details(self, output: str) -> Dict[str, str]:
@@ -279,7 +279,7 @@ class GPUInfoCollector:
                             "类型": "GPGPU"
                         })
                         self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _detect_hygon(self):
@@ -308,7 +308,7 @@ class GPUInfoCollector:
                             **details
                         })
                         self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _collect_hygon_dcu_details(self) -> Dict[str, str]:
@@ -329,7 +329,7 @@ class GPUInfoCollector:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 details = self._parse_hygon_dcu_details(result.stdout)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
         return details
 
@@ -475,7 +475,7 @@ class GPUInfoCollector:
             result = subprocess.run(['rocminfo'], capture_output=True, text=True, timeout=15)
             if result.returncode == 0:
                 details = self._parse_rocminfo_hcu(result.stdout)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
         return details
 
@@ -622,7 +622,7 @@ class GPUInfoCollector:
                                 "类型": "GPU"
                             })
                             self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _detect_amd(self):
@@ -643,7 +643,7 @@ class GPUInfoCollector:
                                 "类型": "GPU"
                             })
                             self._seen_models.add(model_key)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _detect_intel(self):
@@ -660,7 +660,7 @@ class GPUInfoCollector:
                 lines = result.stdout.strip().split('\n')
                 for line in lines:
                     self._parse_lspci_line(line)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _parse_lspci_line(self, line: str):
@@ -774,7 +774,7 @@ class GPUInfoCollector:
                                 "类型": gpu_type
                             })
                             self._seen_models.add(model_key)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass
 
     def _detect_macos_gpu(self):
@@ -795,5 +795,5 @@ class GPUInfoCollector:
                             "类型": "GPU"
                         })
                         self._seen_models.add(model_key)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass

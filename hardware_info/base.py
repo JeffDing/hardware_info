@@ -104,7 +104,7 @@ def run_command(cmd: list, timeout: int = 5) -> tuple:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return result.returncode, result.stdout, result.stderr
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired) as e:
         return -1, "", str(e)
 
 

@@ -183,5 +183,5 @@ class MemoryInfoCollector:
             lines = result.stdout.strip().split('\n')
             # 第一行是表头
             return [line.strip() for line in lines[1:] if line.strip()]
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             return []

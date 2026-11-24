@@ -199,7 +199,7 @@ class DiskInfoCollector:
             lines = result.stdout.strip().split('\n')
             # 第一行是表头
             return [line.strip() for line in lines[1:] if line.strip()]
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             return []
 
     @staticmethod
@@ -208,5 +208,5 @@ class DiskInfoCollector:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             return result.stdout if result.returncode == 0 else ""
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             return ""

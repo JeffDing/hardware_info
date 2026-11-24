@@ -38,7 +38,7 @@ class NPUInfoCollector:
             if result.returncode == 0:
                 output = result.stdout
                 self._parse_npu_smi_info(output)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     def _parse_npu_smi_info(self, output: str):
@@ -278,7 +278,7 @@ class NPUInfoCollector:
         for args in arg_variants:
             try:
                 result = subprocess.run(args, capture_output=True, text=True, timeout=10)
-            except (FileNotFoundError, subprocess.TimeoutExpired):
+            except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired):
                 return None
             if result.returncode != 0:
                 continue

@@ -95,7 +95,7 @@ class CPUInfoCollector:
             if result.returncode == 0:
                 output = result.stdout
                 self._parse_lscpu_output(output)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass
 
         # 方法3: 使用dmidecode
@@ -301,7 +301,7 @@ class CPUInfoCollector:
                             self.info["最大频率"] = f"{mhz/1000:.2f} GHz"
                         except ValueError:
                             pass
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass
 
     def _collect_macos_cpu_info(self):
@@ -316,7 +316,7 @@ class CPUInfoCollector:
                     self.info["厂商"] = "Intel"
                 elif "APPLE" in model.upper():
                     self.info["厂商"] = "Apple"
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
             pass
 
         try:
